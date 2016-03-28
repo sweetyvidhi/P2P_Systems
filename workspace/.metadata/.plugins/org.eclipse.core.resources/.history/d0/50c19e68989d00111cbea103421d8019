@@ -1,0 +1,8 @@
+package adriana.nonatomic;
+
+public class HbeatMsg
+{
+  public Descriptor desc;
+  public double initval;
+  public double value;
+}

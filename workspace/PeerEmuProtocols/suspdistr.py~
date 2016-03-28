@@ -1,0 +1,24 @@
+import os
+import sys
+from datetime import datetime
+
+#N=[500,1000,2000,5000,7500]
+msgloss= [1,5,10,15,20,25,30]
+grpsize=[3,4,5,6,7,8,9,10,11]
+#for nodes in range(len(N)):
+for loss in range(len(msgloss)):
+	for gsize in range(len(grpsize)):
+		curtime = datetime.time(datetime.now())
+		command ='echo "\n%s\n" >> suspdistribution' %(curtime)
+		os.system(command)
+		stt = `msgloss[loss]`+' '+`grpsize[gsize]`
+		command ='echo "\n%s\n" >> suspdistribution' %(stt)
+		os.system(command)
+		command = './go src/thesis/three/aggregation.cfg MSGLOSS='+`msgloss[loss]`+' GROUPSIZE='+`grpsize[gsize]`+' >> suspdistribution'
+		os.system(command)
+		curtime = datetime.time(datetime.now())
+		command ='echo "\n%s\n" >> suspdistribution' %(curtime)
+		os.system(command)
+#find maximum from that file
+#print n grpsize max
+

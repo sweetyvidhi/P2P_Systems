@@ -1,0 +1,336 @@
+/*
+ * Created on Jul 1, 2007 by Spyros Voulgaris
+ *
+ */
+package gossip.protocol;
+
+import gossip.comparator.Random;
+import gossip.descriptor.DescriptorAge;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Vector;
+
+import peeremu.edsim.CDProtocol;
+import peeremu.config.FastConfig;
+import peeremu.core.CommonState;
+import peeremu.core.Descriptor;
+import peeremu.core.Node;
+import peeremu.edsim.EDProtocol;
+import peeremu.transport.Transport;
+
+public class CyclonED extends Gossip implements EDProtocol, CDProtocol
+{
+  /**
+   * This variable holds all protocol-instance related variable,
+   * that have a fixed value for all view participating in an
+   * instance of a protocol, such as the cachesize or gossiplen.
+   */
+  public CyclonSettings cyclonSettings;
+
+  /*
+   * When a node initiates a gossip request, it sends some part of its view to
+   * the other peer. This part of the view is moved from 'view' to 'shippedView'
+   * and when a response is received, it is merged back to 'view', if there are
+   * available slots (e.g., in case of duplicates, or an initially non-full
+   * view).
+   * 
+   * So, this container is to be filled in nextCycle(), and "emptied" in
+   * processResponse().
+   */
+  Vector<Descriptor> shippedView= null;
+
+
+  public CyclonED(String name)
+  {
+    super(name);
+
+    int pid = CommonState.getPid();
+    cyclonSettings = (CyclonSettings)FastConfig.getSettings(pid);
+
+    view = new Vector<Descriptor>(cyclonSettings.viewLen);
+  }
+
+  public String toString()
+  {
+    return name;
+  }
+
+
+
+  /**
+   * Initiates gossip to a peer. Sends the initial message.
+   */
+  public void nextCycle(Node node, int pid)
+  {
+    Descriptor selfDescr = node.getDescriptor(pid);
+    
+    // If there is free space in my view, fill it in with items
+    // that I shipped last time. This will be the case when I shipped
+    // some descriptors to a neighbor, but received no response,
+    // therefore I assume the node I contacted is dead, and I reinsert
+    // to my view the descriptors I had shipped to him.
+    insertReceived(null, shippedView, selfDescr);
+
+    if ( (view.size() == 0) ||
+         (cyclonSettings.gossipLen == 0) )
+      return;
+
+    // Sort based on the selectComparator...
+    Collections.shuffle(view, CommonState.r);
+    Collections.sort(view,
+        Collections.reverseOrder(cyclonSettings.selectComparator));
+
+    // ...and select from the end.
+    int peerIndex = view.size()-1;
+    Descriptor peerDescr = view.remove(peerIndex);
+
+    // Select 'gossipLen'-1 neighbors to send to other peer.
+    // Of course, exclude the peer itself.
+    Vector<Descriptor> descriptorsToSend = selectToSend(peerDescr, cyclonSettings.gossipLen-1);
+
+    // Store the list of sent descriptors for when I receive a response.
+    shippedView = (Vector<Descriptor>) descriptorsToSend.clone();
+
+    // Add my own descriptor to the list to send to the peer.
+    descriptorsToSend.add(selfDescr);
+
+    // Send the selected neighbors to this peer.
+    int tid = FastConfig.getTransport(pid);
+    Transport tr = (Transport) node.getProtocol(tid);
+    Message msg = new Message();
+    msg.type = Message.Type.GOSSIP_REQUEST;
+    msg.sender = selfDescr;
+    msg.descriptors = descriptorsToSend;
+    tr.send(selfDescr, peerDescr, pid, msg);
+  }
+
+
+
+  public void processEvent(Node node, int pid, Object event)
+  {
+    Message msg = (Message) event;
+    switch (msg.type)
+    {
+      case GOSSIP_REQUEST:
+        processGossipRequest(msg.sender, node, pid, msg.descriptors);
+        break;
+      case GOSSIP_RESPONSE:
+        processResponse(node, pid, msg.descriptors);
+    }
+  }
+
+
+
+
+  protected void processGossipRequest(Descriptor sender, Node node, int pid, Vector<Descriptor> received)
+  {
+    // Select 'gossipLen' neighbors to send back.
+    // Of course, exclude that peer.
+    Vector<Descriptor> descriptorsToSend = selectToSend(sender, cyclonSettings.gossipLen);
+
+    // Insert the received descriptors to own view
+    insertReceived(received, descriptorsToSend, sender);
+
+    // If using ages, increase the age of each item in my view by 1.
+    if (view.elementAt(0) instanceof DescriptorAge)
+      for (Descriptor d: view)
+        ((DescriptorAge)d).incAge();
+
+    Descriptor selfDescr = node.getDescriptor(pid);
+
+    // Send the selected neighbors to this peer.
+    int tid = FastConfig.getTransport(pid);
+    Transport tr = (Transport) node.getProtocol(tid);
+    Message msg = new Message();
+    msg.type = Message.Type.GOSSIP_RESPONSE;
+    msg.sender = selfDescr;
+    msg.descriptors = descriptorsToSend;
+    tr.send(selfDescr, sender, pid, msg);
+  }
+
+
+
+
+
+  protected void processResponse(Node node, int pid, Vector<Descriptor> received)
+  {
+    Descriptor myDescr = node.getDescriptor(pid);
+    insertReceived(received, shippedView, myDescr);
+  }
+
+
+
+
+
+  /**
+   * Selects (and removes!) 'howmany' descriptors from the view, to be sent to
+   * another peer.
+   * 
+   * @param dest
+   * @param howmany
+   * @return
+   */
+  protected Vector<Descriptor> selectToSend(Descriptor dest, int howmany)
+  {
+    if (howmany==0)
+      return new Vector<Descriptor>(0); // empty vector
+
+    Vector<Descriptor> selected = new Vector<Descriptor>(cyclonSettings.gossipLen);
+
+    /*
+     * If I want to send ALL items, there's no need to sort them.
+     * Otherwise shuffle them, to select random 'howmany' of them.
+     */
+    if (howmany < view.size())
+    {
+      Collections.shuffle(view, CommonState.r);
+      if (!(cyclonSettings.selectComparator instanceof Random))
+        Collections.sort(view, cyclonSettings.selectComparator);
+    }
+
+    /*
+     * And now select the 'howmany' first of my sorted view.
+     * 
+     * IMPORTANT: Descriptors selected for sending are also removed from my view.
+     */
+    for (int i=0; i<view.size(); i++)
+    {
+      Descriptor d = view.elementAt(i);
+
+      // If the selected descriptor is the destination node, bypass it.
+      if (d.equals(dest))
+        continue;
+
+      view.remove(i--); // also decrease i, since now we have one element less
+      selected.add(d);
+      if (--howmany==0)
+        break;
+    }
+
+    return selected;
+  }
+
+
+
+
+  /**
+   * Inserts the descriptors received by the peer in my own view.
+   * 
+   * @param received
+   * @param sent
+   * @param self
+   */
+  protected void insertReceived(Vector<Descriptor> received, Vector<Descriptor> sent, Descriptor self)
+  {
+    // Insert received descriptors to own view.
+    if (received != null)
+      for (Descriptor d: received)
+      {
+        if (view.size() >= cyclonSettings.viewLen)
+          break;
+        insert(d);
+      }
+
+    // Now try filling up empty slots with neighbors I sent to the other peer.
+    if (sent != null)
+      for (Descriptor d: sent)
+      {
+        if (d.equals(self))
+          continue; // Bypass it if it's my own descriptor
+        
+        if (view.size() == cyclonSettings.viewLen)
+          break;
+        insert(d);
+      }
+  }
+
+
+
+
+
+  protected void insert(Descriptor d)
+  {
+    int foundAt = view.indexOf(d);
+
+    if (foundAt==-1) // 'd' is not in my view ==> put it!
+      view.add(d);
+    else // we have a duplicate ==> Keep the preferred one
+    {
+      Descriptor existingItem = view.elementAt(foundAt);
+      if (cyclonSettings.duplComparator.compare(d,existingItem) < 0)
+        view.setElementAt(d, foundAt);
+    }
+  } 
+
+
+
+
+
+  /**
+   * This method sorts the cache according to the preference
+   * to send view to a neighbor. In random selection, it
+   * should simply shuffle the cache.
+   */
+  protected void sortToSend(List<Descriptor> itemList, Descriptor refItem)
+  {
+    // First shuffle no matter what, to avoid systematic errors.
+    Collections.shuffle(itemList, CommonState.r);
+
+    if (cyclonSettings.sendComparator != null)
+    {
+      cyclonSettings.sendComparator.setReference(refItem);
+      Collections.sort(itemList, cyclonSettings.sendComparator);
+    }
+  }
+
+
+
+  /**
+   * This list sorts the cache according to the preference
+   * to keep view after gossiping. In random selection, it
+   * should simply shuffle the cache.
+   */
+  public void sortToKeep(Descriptor refItem)
+  {
+    // First shuffle no matter what, to avoid systematic errors.
+    Collections.shuffle(view, CommonState.r);
+    
+    if (cyclonSettings.keepComparator != null)
+    {
+      cyclonSettings.keepComparator.setReference(refItem);
+      Collections.sort(view, cyclonSettings.keepComparator);
+    }
+  }
+
+  
+
+  public int degree()
+  {
+    return view.size() + (shippedView==null ? 0 : shippedView.size());
+  }
+
+  public boolean addNeighbor(Descriptor neighbor)
+  {
+    if (contains(neighbor))
+      return false;
+
+    if (view.size() >= cyclonSettings.viewLen)
+      throw new IndexOutOfBoundsException();
+
+    view.add(neighbor);
+    return true;
+  }
+
+  public Descriptor getNeighbor(int i)
+  {
+    int vs = view.size();
+    return i<vs ? view.elementAt(i) : shippedView.elementAt(i-vs);
+  }
+
+  public boolean contains(Descriptor d)
+  {
+    return view.contains(d) ||
+           (shippedView!=null && shippedView.contains(d));
+  }
+}

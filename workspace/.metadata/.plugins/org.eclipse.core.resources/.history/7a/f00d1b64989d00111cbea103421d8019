@@ -1,0 +1,5 @@
+package adriana.nonatomic;
+
+public class HbeatMsg
+{
+}

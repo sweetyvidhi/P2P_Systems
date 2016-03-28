@@ -1,0 +1,63 @@
+package adriana.nonatomic;
+
+
+import peeremu.config.Configuration;
+import peeremu.core.Control;
+import peeremu.core.Network;
+import peeremu.core.Node;
+
+public class GroupControl implements Control
+{
+  private int pid;
+  
+  public GroupControl(String prefix)
+  {
+    pid = Configuration.getPid(prefix+"."+PAR_PROTOCOL);
+  }
+  @Override
+  public boolean execute()
+  {
+    int i,j;
+    double sum=0.0;
+    for(i=0;i<Network.size();i++)
+    {
+      Node n = Network.get(i);
+      long myid = n.getDescriptor(pid).getID();
+      AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+      int ngroups = (int)Network.size()/ap.groupsize;
+      int groupid = (int)myid%ngroups;
+      System.out.println("My id "+myid+" Group : "+groupid+" Initval "+ap.initval); 
+      for(j=groupid;j<Network.size();j+=ngroups)
+      {
+        Node n1=Network.get(j); 
+        if(j!=myid)
+          { 
+            Suspicion susp = new Suspicion();
+            susp.desc = n1.getDescriptor(pid);
+            susp.suspvalue=0;
+            susp.esttime=0;
+            susp.lastmsgtime=0;
+            susp.first=true;
+            susp.initval=-1;
+            susp.value=-1;
+            susp.state = Suspicion.State.ALIVE;
+            //ap.group.add(n1.getDescriptor(pid));
+            ap.sp.add(susp);
+            System.out.print(j+" ");    
+          }
+        
+      }
+      sum+=ap.initval;
+    }
+    double avg = sum/Network.size();
+    for(i=0;i<Network.size();i++)
+    {
+      Node n = Network.get(i);
+      AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+      ap.trueavg = avg;
+    }
+    System.out.println(" Sum " +sum+" Average "+avg);
+    return false;
+  }
+  
+}

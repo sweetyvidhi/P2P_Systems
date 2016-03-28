@@ -1,0 +1,47 @@
+import sys
+
+if(len(sys.argv)) > 1:
+	filename = sys.argv[1]
+	nodes = int(sys.argv[2])
+else:
+	sys.exit(0)
+f=open(filename,"r");
+lines = f.readlines();
+N=50;
+sumarr=[0] * N;
+mean=[0]*N;
+temp=[0]*N;
+stddev=[0]*N;
+avg=0.0;
+j=0;
+for i in lines:
+	j+=1;				#Retrieve the sum of values for each round
+	if j > 3:			
+		thisline=i.split();
+		if thisline[0] == 'Average':
+			avg=float(thisline[1])
+		else:
+			r= int(thisline[0])
+			val=float(thisline[1])
+			sumarr[r]+=val
+
+for i in range(N):		#Calculate the mean of the values for each round
+	mean[i]=sumarr[i]/nodes
+
+j=0;
+for i in lines:	
+	j+=1;				#Calculate the sum of difference of the values from the mean for each round
+	if j > 3:		
+		thisline=i.split();
+		if thisline[0] != 'Average':
+			r=int(thisline[0])
+			val=float(thisline[1])
+			temp[r]+=(val-avg) ** 2
+
+for i in range(N):
+	stddev[i]=(temp[i]/nodes) ** 0.5
+	print i,stddev[i],mean[i],temp[i]
+	
+	
+		
+

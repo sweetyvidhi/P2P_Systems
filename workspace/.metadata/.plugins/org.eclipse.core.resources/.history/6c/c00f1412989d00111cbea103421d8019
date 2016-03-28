@@ -1,0 +1,6 @@
+package adriana.nonatomic;
+
+public class RqstMsg extends Message
+{
+  
+}

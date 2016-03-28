@@ -1,0 +1,40 @@
+10
+
+dir
+360
+svn+ssh://svn@acropolis.cs.vu.nl/Source/PeerEmuProtocols/src/gossip
+svn+ssh://svn@acropolis.cs.vu.nl/Source
+
+
+
+2011-11-08T15:36:38.286298Z
+351
+spyros
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+c88ae8d0-8006-0410-a79b-b97b1fdabc8d
+
+protocol
+dir
+
+comparator
+dir
+
+descriptor
+dir
+
+vicinity
+dir
+

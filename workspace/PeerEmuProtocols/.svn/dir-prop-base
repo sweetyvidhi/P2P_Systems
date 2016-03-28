@@ -1,0 +1,19 @@
+K 10
+svn:ignore
+V 137
+scripts
+sim
+bin
+meridian.map
+*.dat
+scratch
+*.png
+*.swp
+*.err
+logs
+fb_1ksample.txt
+randomsubset_1000.txt
+randomsubset_10000.txt
+skype.avt
+
+END

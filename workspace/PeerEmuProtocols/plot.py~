@@ -1,0 +1,10 @@
+set logscale xy
+set terminal png enhanced large
+
+set output 'kempeN=1000.png'
+set output 'kempeN=1000.png'
+set output 'kempeN=1000.png'
+set output 'kempeN=1000.png'
+set output 'kempeN=1000.png'
+set output 'kempeN=1000.png'
+set output 'kempeN=1000.png'

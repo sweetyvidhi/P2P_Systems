@@ -1,0 +1,19 @@
+import sys
+import os
+
+if(len(sys.argv)) > 1:
+	filename = sys.argv[1]
+
+f=open(filename,"r")
+lines = f.readlines()
+for i in lines:
+	thisline=i.split()
+	nodes = int(thisline[0])
+	gsize = int(thisline[1])
+	msgloss = int(thisline[2])
+	maximum = int(thisline[3])
+	stt=`msgloss`+' '+`maximum` 
+	fname= `nodes`+'_'+`gsize`
+	command = 'echo "%s" >> %s' %(stt,fname)
+	os.system(command)
+

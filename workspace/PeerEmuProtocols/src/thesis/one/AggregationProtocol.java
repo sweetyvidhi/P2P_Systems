@@ -1,0 +1,348 @@
+package thesis.one;
+
+import java.util.Vector;
+
+import peeremu.config.Configuration;
+import peeremu.config.FastConfig;
+import peeremu.core.CommonState;
+import peeremu.core.Descriptor;
+import peeremu.core.Linkable;
+import peeremu.core.Node;
+import peeremu.edsim.CDProtocol;
+import peeremu.edsim.EDProtocol;
+import peeremu.edsim.EDSimulator;
+import peeremu.transport.Transport;
+
+public class AggregationProtocol implements EDProtocol,CDProtocol
+{
+  private static final String PAR_VALUE = "value";
+  //private static final String PAR_VIEWLEN = "view";
+  private static final String PAR_SIZE = "size";
+  private static final String PAR_GROUPSIZE = "groupsize";
+  private static final String PAR_TGOSSIP="time_gossip";
+  private static final String PAR_TBCAST="time_broadcast";
+  private static final String PAR_TCALC = "time_calc";
+  private static final String PAR_TCLEANUP="time_cleanup";
+  private static final String PAR_SUSPTHRESH="susp_thresh";
+  private static final String PAR_MSGTHRESH="msg_thresh";
+  //private int viewlen;
+  private int size;
+  public int groupsize;
+  private long tgossip;
+  private long tbcast;
+  private long tcalc;
+  private long tcleanup;
+  private double susp_threshold;
+  private double msg_threshold;
+  public double value;
+  private boolean first = true;
+  public double initval;
+  public double trueavg;
+
+  public int round;
+  //public Vector<Descriptor> view;
+  public Vector<Suspicion> sp;
+  public Vector<Suspicion> dead;
+
+  public AggregationProtocol(String prefix)
+  {
+    value = Configuration.getInt(prefix+"."+PAR_VALUE);
+    //viewlen = Configuration.getInt(prefix+"."+PAR_VIEWLEN);
+    size = Configuration.getInt(prefix+"."+PAR_SIZE);
+    groupsize = Configuration.getInt(prefix+"."+PAR_GROUPSIZE);
+    tgossip = Configuration.getLong(prefix+"."+PAR_TGOSSIP);
+    tbcast = Configuration.getLong(prefix+"."+PAR_TBCAST);
+    tcalc = Configuration.getLong(prefix+"."+PAR_TCALC);
+    tcleanup = Configuration.getLong(prefix+"."+PAR_TCLEANUP);
+    susp_threshold = Configuration.getDouble(prefix+"."+PAR_SUSPTHRESH);
+    msg_threshold = Configuration.getDouble(prefix+"."+PAR_MSGTHRESH);
+    //view = new Vector<Descriptor>(viewlen);
+    sp = new Vector<Suspicion>(groupsize-1);
+    dead = new Vector<Suspicion>(groupsize-1);
+
+  }
+
+  public Object clone()
+  {
+    AggregationProtocol ap = null;
+    try
+    {
+      ap = (AggregationProtocol)super.clone();
+    }
+    catch(CloneNotSupportedException e){
+      e.printStackTrace();
+    }
+    //ap.view = (Vector<Descriptor>)view.clone();
+    ap.sp = (Vector<Suspicion>)sp.clone();
+    ap.dead = (Vector<Suspicion>)dead.clone();
+    ap.round = 0;
+    ap.value = (double)CommonState.r.nextInt(size);
+    ap.initval = ap.value;
+    return ap;
+  }
+
+  @Override
+  public void nextCycle(Node node, int protocolID)
+  {
+    int linkableID = FastConfig.getLinkable(protocolID);
+    Linkable linkable = (Linkable) node.getProtocol(linkableID);
+
+
+
+    Descriptor mydesc = node.getDescriptor(protocolID);
+    long curtime = CommonState.getTime();
+    System.out.println(round+" "+value);
+    //System.out.println(curtime+ ": "+mydesc.getID()+" "+round+" "+value);  //Experiment:failure1 : value-trueavg
+    round = round + 1;
+    //int r = CommonState.r.nextInt(this.degree());
+    //Descriptor receiverdesc = this.getNeighbor(r);
+    if(linkable.degree() > 0)
+    {
+      Descriptor receiverdesc = linkable.getNeighbor(CommonState.r.nextInt(linkable.degree()));
+      RqstMsg msg = new RqstMsg();
+      msg.value = value;
+      msg.desc = mydesc;
+//      msg.display();
+//      System.out.println(" to "+receiverdesc.getID());
+      int tid = FastConfig.getTransport(protocolID);
+      Transport tr = (Transport)node.getProtocol(tid);
+      tr.send(mydesc,receiverdesc,protocolID,msg);
+    }
+    
+    if(first)
+    {
+      for(int i=0;i<sp.size();i++)
+      { 
+        sp.get(i).esttime = curtime+tbcast; 
+      }
+      EDSimulator.add(tbcast, new Message(Message.Type.BCAST), node, protocolID); //To send heartbeat message
+      EDSimulator.add(tgossip, new Message(Message.Type.GOSSIP), node, protocolID); //To gossip the suspicion value
+      EDSimulator.add(tcalc, new Message(Message.Type.CALC), node, protocolID);                                                                //To calculate the suspicion value; 
+      EDSimulator.add(tcleanup, new Message(Message.Type.CLEANUP), node, protocolID); // To check for failed nodes
+    }
+    first = false;
+  }
+
+  @Override
+  public void processEvent(Node node, int pid, Object event)
+  {
+    Descriptor mydesc = node.getDescriptor(pid);
+    long curtime = CommonState.getTime();
+    if(event instanceof RespMsg)
+    {
+      RespMsg m = (RespMsg) event;
+//      System.out.println("Recv "+mydesc.getID()+" "+value);
+//      m.display();
+      if(value==m.svalue)
+      {
+        value = (value + m.rvalue)/2;
+      }
+      else
+      {
+        value = value + ((m.rvalue-m.svalue)/2);
+      }
+      // System.out.println(mydesc.getID()+ " = "+value);
+      for(int i=0;i<sp.size();i++)
+      {
+        if(sp.get(i).desc.getID() == m.desc.getID())
+        {
+          sp.get(i).lastmsgtime = curtime;
+        }
+      }
+
+    }
+    else if(event instanceof RqstMsg)
+    {
+      RqstMsg m = (RqstMsg) event;
+      RespMsg msg = new RespMsg();
+      msg.desc = mydesc;
+      msg.svalue = m.value;
+      msg.rvalue = value;
+//      msg.display();
+//      System.out.println(" to "+m.desc.getID());
+      int tid = FastConfig.getTransport(pid);
+      Transport tr = (Transport)node.getProtocol(tid);
+      tr.send(mydesc,m.desc,pid,msg);
+      value = (value + m.value)/2;
+      for(int i=0;i<sp.size();i++)
+      {
+        if(sp.get(i).desc.getID() == m.desc.getID())
+        {
+          sp.get(i).lastmsgtime = curtime;
+        }
+      }
+    } 
+    else if(event instanceof HbeatMsg) //Arrival of a heartbeat message
+    {
+      HbeatMsg m = (HbeatMsg) event;
+      for(int i=0;i<sp.size();i++)
+      {
+        if(sp.get(i).desc.getID() == m.desc.getID())
+        {
+          sp.get(i).esttime = sp.get(i).esttime + tbcast;
+          sp.get(i).lastmsgtime = curtime;
+          sp.get(i).value = m.value;
+          if(sp.get(i).first)
+          {
+            sp.get(i).initval = m.initval;
+            sp.get(i).first = false;
+          }
+          //System.out.println("HBEAT : "+curtime+" "+node.getID()+" : "+sp.get(i).desc.getID() + " = " +sp.get(i).esttime);
+          break;
+        }
+      }
+
+    }
+    else if(event instanceof SuspicionMsg) //Arrival of a message with suspicion values
+    {
+      SuspicionMsg m = (SuspicionMsg) event;
+      for(int i=0;i<sp.size();i++)
+      {
+        for(int j=0;j<m.sp.size();j++)
+        {
+          if(sp.get(i).desc.getID() == m.sp.get(j).desc.getID() && sp.get(i).suspvalue > m.sp.get(j).suspvalue)
+          {
+            sp.get(i).suspvalue = m.sp.get(j).suspvalue;
+          }
+        }
+        if(sp.get(i).desc.getID() == m.desc.getID())
+        {
+          sp.get(i).lastmsgtime = curtime;
+        }
+      }
+    }
+    else if(event instanceof DeadMsg)
+    {
+      DeadMsg m = (DeadMsg) event;
+      for(int i=0;i<sp.size();i++)
+      {
+        if(sp.get(i).desc.getID() == m.deadnode.getID())
+        {
+          sp.get(i).state = Suspicion.State.DEAD;
+          dead.add(sp.get(i));
+          sp.remove(i);
+          break;
+        }
+      }
+      for(int i=0;i<dead.size();i++)
+      {
+        if(dead.get(i).desc.getID() == m.deadnode.getID() && dead.get(i).state == Suspicion.State.DEADFIRST && m.desc.getID() < mydesc.getID())
+        {
+          value = value - (dead.get(i).value - dead.get(i).initval);
+          dead.get(i).state = Suspicion.State.DEAD;
+        }
+      }
+    }
+    else if(event instanceof Message)
+    {
+      Message m = (Message)event;
+      //System.out.println("time : "+curtime+" "+node.getID()+" "+m.type+" "+m.sender.getID());
+      if(m.getType() == Message.Type.BCAST) //Sending heartbeat message to others
+      {
+        for(int i=0;i<sp.size();i++)
+        {
+          HbeatMsg msg = new HbeatMsg();
+          msg.initval = initval;
+          msg.value = value;
+          msg.desc = mydesc;
+          int tid = FastConfig.getTransport(pid);
+          Transport tr = (Transport)node.getProtocol(tid);
+          tr.send(mydesc, sp.get(i).desc, pid, msg);
+          //System.out.println("Sending heartbeat msg from "+mydesc.getID()+" to "+sp.get(i).desc.getID());
+        }
+        EDSimulator.add(tbcast, new Message(Message.Type.BCAST), node, pid);
+      }
+      else if(m.getType() == Message.Type.GOSSIP) //Sending suspicion values to others
+      {
+        for(int i=0;i<sp.size();i++)
+        {
+          SuspicionMsg msg = new SuspicionMsg();
+          msg.sp = sp;
+          msg.desc = mydesc;
+          int tid = FastConfig.getTransport(pid);
+          Transport tr = (Transport)node.getProtocol(tid);
+          tr.send(mydesc, sp.get(i).desc, pid, msg);
+        }
+        EDSimulator.add(tgossip, new Message(Message.Type.GOSSIP), node, pid);
+      }
+      else if(m.getType() == Message.Type.CALC)
+      {
+        for(int i=0;i<sp.size();i++)
+        {
+          sp.get(i).suspvalue = Math.log10(curtime-sp.get(i).esttime+1);
+          //System.out.println("At "+curtime+" "+node.getID()+" : "+sp.get(i).desc.getID() + " = " + sp.get(i).suspvalue+" "+sp.get(i).esttime);
+        }
+        EDSimulator.add(tcalc, new Message(Message.Type.CALC), node, pid);
+      }
+      else if(m.getType() == Message.Type.CLEANUP)
+      {
+        for(int i=0;i<sp.size();i++)
+        {
+          if(sp.get(i).suspvalue>susp_threshold && (curtime - sp.get(i).lastmsgtime) > msg_threshold)
+          {
+            System.out.println("At "+curtime+" "+node.getID()+" says "+sp.get(i).desc.getID()+" is dead");
+            DeadMsg deadmsg = new DeadMsg();
+            deadmsg.desc = mydesc;
+            deadmsg.deadnode = sp.get(i).desc;
+            for(int j=0;j<sp.size();j++)
+            {
+              if(j!=i)
+              {
+                int tid = FastConfig.getTransport(pid);
+                Transport tr = (Transport)node.getProtocol(tid);
+                tr.send(mydesc, sp.get(j).desc, pid, deadmsg);
+              }
+            }
+            value = value + (sp.get(i).value - sp.get(i).initval);
+            sp.get(i).state = Suspicion.State.DEADFIRST;
+            dead.add(sp.get(i));
+            sp.remove(i);
+          }
+        }
+        EDSimulator.add(tcleanup, new Message(Message.Type.CLEANUP), node, pid);
+      }
+    }
+
+  }
+  /*@Override
+  public void onKill()
+  {
+    // TODO Auto-generated method stub
+
+  }
+
+  @Override
+  public int degree()
+  {
+    return view.size();
+  }
+
+  @Override
+  public Descriptor getNeighbor(int i)
+  {
+    return view.elementAt(i);
+  }
+
+  @Override
+  public boolean addNeighbor(Descriptor neighbour)
+  {
+    view.add(neighbour);
+    return false;
+  }
+
+  @Override
+  public boolean contains(Descriptor neighbor)
+  {
+    // TODO Auto-generated method stub
+    return false;
+  }
+
+  @Override
+  public void pack()
+  {
+    // TODO Auto-generated method stub
+
+  }*/
+
+}
+

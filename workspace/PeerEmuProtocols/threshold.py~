@@ -1,0 +1,29 @@
+import sys
+
+if len(sys.argv) <= 1:
+	print 'Not enough arguments'
+	sys.exit(0)
+
+path = '/home/vidya/Desktop/vidhi/Academics/PDCS/Thesis/graphs/evaluation/LogPlots/'
+protocol = sys.argv[1]	
+threshold = float(sys.argv[2])
+
+N = [ 100,200,500,1000,2000,3000,4000,5000,6000,7500 ]
+print "Protocol %s Threshold %s" %(protocol,threshold)
+for nodes in range(len(N)):
+	filename = path+protocol+'N='+str(N[nodes])
+	f = open(filename,"r")
+	lines = f.readlines()
+	for i in lines:
+		thisline = i.split()
+		r = int(thisline[0])
+		val = float(thisline[1])
+		if(val<=threshold):
+			print "N %s round %s" %(N[nodes],r)
+			break
+
+
+	
+	
+		
+

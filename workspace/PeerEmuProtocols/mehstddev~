@@ -1,0 +1,24 @@
+f=open("mehtest","r");
+lines = f.readlines();
+
+sumarr=0;
+mean=0;
+temp=0;
+stddev=0;
+nodes=500
+for i in lines:
+	val=float(thisline[1])
+	sumarr+=val
+mean=sumarr/nodes
+
+for i in lines:	
+	thisline=i.split();
+	val=float(thisline[1])
+	temp+=(val-mean) ** 2
+
+stddev=(temp/nodes) ** 0.5
+print stddev,mean,temp
+	
+	
+		
+

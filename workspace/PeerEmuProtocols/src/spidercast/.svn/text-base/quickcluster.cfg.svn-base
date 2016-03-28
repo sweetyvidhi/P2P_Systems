@@ -1,0 +1,401 @@
+CYCLON_VIEW              20
+CYCLON_GOSSIP            10
+VIC_VIEW                 20
+VIC_GOSSIP               10
+RT_GOSSIP                10
+
+#NODES                    13790
+NODES                    1050
+
+TICKS_PER_SEC            1000   # each simulation tick corresponds to 1 msec
+SEC_PER_CYCLE            1      # the cycle length is 1 second
+
+TICKS_PER_CYCLE          TICKS_PER_SEC * SEC_PER_CYCLE
+
+
+
+CYCLES                   12  # maximum number of cycles to execute
+random.seed              953617810760668
+simulation.endtime       TICKS_PER_CYCLE * CYCLES
+network.size             NODES
+#simulation.cycles        TICKS_PER_CYCLE * CYCLES
+
+SEC                      1
+#debug.config full
+
+
+################
+# INITIALIZERS #
+################
+include.init             topic_initializer, topology_cyclon, king_latencies, optimaloverlay
+#include.init              topic_initializer, cd_cyclon, topology_cyclon, cd_vicinity
+#include.init             cd_cyclon, topology_cyclon
+
+
+init.topology_cyclon     peeremu.dynamics.WireKOut
+{
+  protocol               cyclon
+  k                      CYCLON_VIEW
+}
+
+
+init.cd_cyclon           peeremu.edsim.CDScheduler
+{
+  protocol               cyclon
+  randstart
+}
+
+
+init.cd_vicinity         peeremu.edsim.CDScheduler
+{
+  protocol               vicinity
+  randstart
+}
+
+init.cd_routing          peeremu.edsim.CDScheduler
+{
+  protocol               routing
+  randstart
+}
+
+init.traces                 TraceCharacteristics
+	{
+	       routing        routing
+	}
+
+init.topic_initializer   spidercast.quickcluster.NodeTopicsInitializer
+{
+	protocol               routing
+	
+	
+	data_uni          spidercast.workload.UniformTopicsGenerator
+	{
+	  NUM_TOPICS           1000
+	  minTopicsPerNode     1
+	  maxTopicsPerNode     500
+	}
+	
+	data_exp               spidercast.workload.ExponentialTopicsGenerator
+	{
+	  NUM_TOPICS           100
+	  minTopicsPerNode     1
+	  maxTopicsPerNode     10
+	}
+	
+	data_zipf                spidercast.workload.ZipfTopicsGenerator
+	{
+	  NUM_TOPICS           100
+	  minTopicsPerNode     1
+	  maxTopicsPerNode     100
+	}
+	
+	data                  spidercast.workload.SubscriptionsFileReader
+	{
+	  file                 randomsubset_1000.txt
+	  #file                 fb_1ksample.txt
+	  #file                  twitter10-1000.txt
+	}
+	
+	data_fb          spidercast.workload.SubscriptionsFileReader
+	{
+	  file                 facebook_traces.txt
+	}
+}
+
+
+init.optimaloverlay      spidercast.quickcluster.OptimalRoutingTableInitializer
+{
+     protocol            routing
+     vicinity            vicinity
+     keepoptimalrt
+}
+
+init.king_latencies      peeremu.transport.MatrixParser
+{
+  file                   king_matrix_connected.txt
+  ticks_per_sec          TICKS_PER_SEC
+  trace_ticks_per_sec    1000000    # king matrix is in microseconds
+}
+
+#############
+# PROTOCOLS #
+#############
+
+include.protocol         routing, cyclon, vicinity, trans, publishing
+#include.protocol         routing, cyclon, vicinity, trans, publishing
+#include.protocol         cyclon, trans
+
+protocol.cyclon          CyclonQC
+{
+  routing                routing
+  descriptor             DescriptorQC
+  settings               gossip.protocol.CyclonSettings
+
+  select                 gossip.comparator.AgeDescending
+  duplicate              gossip.comparator.AgeAscending
+
+  view                   CYCLON_VIEW
+  gossip                 CYCLON_GOSSIP
+  step                   TICKS_PER_CYCLE
+
+  transport              trans
+}
+
+
+protocol.vicinity        spidercast.quickcluster.VicinityQC
+{
+  linkable               cyclon
+
+  routing                routing
+
+  descriptor             spidercast.quickcluster.DescriptorQC
+  settings               spidercast.quickcluster.VicinitySettingsQC
+
+  sendLinkableItems      true
+
+  view                   VIC_VIEW
+  gossip                 VIC_GOSSIP
+  step                   TICKS_PER_CYCLE
+
+  transport              trans
+}
+
+
+protocol.routing         spidercast.quickcluster.RoutingTableRingCastPerNeighbor
+{
+  linkable               cyclon, vicinity
+  descriptor             spidercast.quickcluster.DescriptorRT
+  K                      4
+  settings               spidercast.quickcluster.VicinitySettingsQC
+  step                   TICKS_PER_CYCLE
+  transport              trans
+  sendLinkableItems      false
+  gossip                 RT_GOSSIP
+  refprotocol            all
+}
+
+protocol.routing_prio    spidercast.quickcluster.RoutingTablePriority
+{
+  linkable               vicinity, cyclon
+  descriptor             spidercast.quickcluster.DescriptorRT
+  K                      2
+  settings               spidercast.quickcluster.VicinitySettingsQC
+  step                   TICKS_PER_CYCLE
+  transport              trans
+  sendLinkableItems      false
+  gossip                 RT_GOSSIP
+  refprotocol            vicinity
+}
+
+protocol.publishing      spidercast.quickcluster.DisseminationProtocol
+{
+  routing                routing
+  F                      2
+  settings               spidercast.quickcluster.VicinitySettingsQC
+  step                   TICKS_PER_CYCLE
+  transport              trans
+  sendLinkableItems      false
+}
+
+protocol.trans           TransportEmuQC
+
+
+protocol.transuni          UniformRandomTransport
+{
+  mindelay               0
+  maxdelay               0
+}
+
+###################
+#    OBSERVERS    #
+###################
+
+include.control         publicationsender
+#ringlinkobserver, publicationobserver
+#degree, connectivity
+
+control.deadlinks        spidercast.quickcluster.DeadStats
+{
+  protocol               routing
+    from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+}
+control.coverage         spidercast.quickcluster.CoverageObserver
+{
+  protocol               vicinity
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+}
+
+control.connectivity     spidercast.quickcluster.TopicConnectivityObserver
+{
+  protocol               vicinity
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+}
+
+control.degree           spidercast.quickcluster.DegreeObserver
+{
+  protocol               routing
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+  #at                    1000
+  undir
+  method                 stats
+  #FINAL
+}
+
+control.degree_vic       peeremu.reports.DegreeStats
+{
+  protocol               vicinity
+  linktype               dead
+  step                   TICKS_PER_CYCLE
+  method                 stats
+}
+
+control.degree_cyc       peeremu.reports.DegreeStats
+{
+  protocol               cyclon
+  linktype               dead
+  step                   TICKS_PER_CYCLE
+  method                 stats
+}
+
+control.dead_rings       spidercast.quickcluster.DeadStats
+{
+  protocol               routing
+  step                   TICKS_PER_CYCLE
+}
+
+control.clusteringcoefficient       spidercast.quickcluster.ClusteringCoefficientObserver
+{
+  protocol               routing
+  from                   TICKS_PER_CYCLE*2
+  step                   TICKS_PER_CYCLE
+}
+control.clustersstat     spidercast.quickcluster.TCDistributionObserver
+{
+  protocol               vicinity
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+  #at                    1000
+  undir
+  method                 stats
+  type                   wcc
+  #FINAL
+}
+
+control.clusters         spidercast.quickcluster.TopicConnectivityObserver
+{
+  protocol               vicinity
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+  #at                    1000
+  undir
+  method                 stats
+  type                   wcc
+  #FINAL
+}
+
+control.publicationsender         PublicationSender
+{
+  protocol               publishing
+  routing                routing
+  F                      2
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE * 6
+  
+  #measureload
+  #detailed
+}
+
+control.hitratio         HitRatioObserver
+{
+  protocol               publishing
+  routing                routing
+  F                      2
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+}
+control.ringlinkobserver      spidercast.quickcluster.RingConstructionObserver
+{
+  protocol            routing
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+  #measurehops
+  measureaggregate
+  compareoptimal
+  #measureload
+}
+
+control.optimalringobserver      spidercast.quickcluster.OptimalRingConstruction
+{
+  protocol            routing
+  from                   TICKS_PER_CYCLE
+  step                   TICKS_PER_CYCLE
+  vicinity               vicinity
+  cyclon                 cyclon
+}
+
+control.churn1            peeremu.dynamics.DynamicNetwork
+{
+  add                    0.01
+  substitute
+  init.0                 peeremu.dynamics.RandNI
+  init.0.protocol        routing
+  init.0.k               C
+}
+
+control.churn            AvailabilityTraceDynamicsED
+{
+  #file                   saroiu.dat
+  file                   skype.avt
+
+  ticks_per_sec          TICKS_PER_SEC
+  step                   TICKS_PER_CYCLE        
+  until                  14400000
+  protocol               routing
+  cyclon                 cyclon
+  vicinity               vicinity
+
+  k                      CYCLON_VIEW
+
+  init.2                 peeremu.edsim.CDScheduler
+  init.2.protocol        cyclon
+
+  init.4                 peeremu.edsim.CDScheduler
+  init.4.protocol        vicinity
+
+  init.5                 peeremu.edsim.CDScheduler
+  init.5.protocol        routing
+
+  warmup                 10
+}
+
+control.dnet             peeremu.dynamics.DynamicNetwork
+{
+  add                    -10
+  
+  at                     TICKS_PER_CYCLE * 5
+  
+  maxsize                  1050
+  init.0                 peeremu.dynamics.RandNI
+  init.0.protocol        cyclon
+  init.0.k               CYCLON_VIEW
+
+  init.1                 NodeSubscriptionInitializer
+  init.1.protocol        routing
+
+  init.2                 peeremu.edsim.CDScheduler
+  init.2.protocol        cyclon
+
+  init.3                 peeremu.edsim.CDScheduler
+  init.3.protocol        vicinity
+
+  init.4                 peeremu.edsim.CDScheduler
+  init.4.protocol        routing
+
+  init.5                 peeremu.dynamics.RandNI
+  init.5.protocol        vicinity
+  init.5.k               VIC_VIEW
+}

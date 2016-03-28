@@ -1,0 +1,18 @@
+package random;
+
+import peeremu.core.Node;
+import peeremu.edsim.CDProtocol;
+import peeremu.core.Protocol;
+
+public class RandomProtocol implements EDProtocol
+{
+
+  @Override
+  public void nextCycle(Node node, int protocolID)
+  {
+    // TODO Auto-generated method stub
+    
+  }
+  
+
+}

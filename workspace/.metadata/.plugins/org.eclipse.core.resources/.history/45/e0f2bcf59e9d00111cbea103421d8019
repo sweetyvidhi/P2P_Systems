@@ -1,0 +1,8 @@
+package adriana.nonatomic;
+
+import java.util.Vector;
+
+public class SuspicionMsg
+{
+  public Vector<Suspicion> sp;
+}

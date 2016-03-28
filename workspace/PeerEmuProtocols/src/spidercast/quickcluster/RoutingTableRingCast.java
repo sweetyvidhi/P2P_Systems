@@ -1,0 +1,558 @@
+/**
+ * 
+ */
+package spidercast.quickcluster;
+
+import gossip.descriptor.DescriptorAge;
+import gossip.protocol.Message;
+import gossip.vicinity.VicinitySettings;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.Vector;
+
+import peeremu.edsim.CDProtocol;
+import peeremu.config.Configuration;
+import peeremu.config.FastConfig;
+import peeremu.core.CommonState;
+import peeremu.core.Descriptor;
+import peeremu.core.DescriptorSim;
+import peeremu.core.Linkable;
+import peeremu.core.Network;
+import peeremu.core.Node;
+import peeremu.edsim.EDProtocol;
+import peeremu.transport.Transport;
+
+
+
+
+
+/**
+ * @author vinaysetty
+ * 
+ */
+public class RoutingTableRingCast extends RoutingTableHash implements EDProtocol, CDProtocol
+{
+  private NodeIDDistanceComparator distComp;
+  Map<Integer, Integer> topicAge = null;
+  protected int rtGossipLen;
+  private static final String PAR_GOSSIPLEN = "gossip";
+  protected int selfPID;
+
+
+
+  /**
+   * @param prefix
+   */
+  public RoutingTableRingCast(String prefix)
+  {
+    super(prefix);
+    selfPID = CommonState.getPid();
+    distComp = new NodeIDDistanceComparator();
+    rtGossipLen = Configuration.getInt(prefix+"."+PAR_GOSSIPLEN, -1);
+  }
+
+
+
+  @Override
+  public int numNonCoveredTopics()
+  {
+    int count = 0;
+    for (Integer topic: neighborMap.keySet())
+      if (neighborMap.get(topic).size()<K)
+        count++;
+    return count;
+  }
+
+
+
+  @Override
+  public Set<Descriptor> getNeighborsOfTopic(int topic)
+  {
+    HashSet<Descriptor> neighbors = new HashSet<Descriptor>(getRingNeighbors(topic));
+    // HashSet<Descriptor> randNeighbors = (HashSet<Descriptor>)
+    // getRandomNeighbors(topic);
+    // if (randNeighbors!=null)
+    // neighbors.addAll(getRandomNeighbors(topic));
+    return neighbors;
+  }
+
+
+
+  public Set<Descriptor> getRandomNeighbors(Node selfNode, int topic)
+  {
+    // return randomNeighborMap.get(topic);
+    return null;
+  }
+
+
+
+  public Set<Descriptor> getRingNeighbors(int topic)
+  {
+    return neighborMap.get(topic);
+  }
+
+
+
+  public void removeNeighbor(Descriptor peer)
+  {
+    for (Set<Descriptor> neighbors: neighborMap.values())
+    {
+      if (neighbors.contains(peer))
+      {
+        neighbors.remove(peer);
+      }
+    }
+  }
+
+
+
+
+  @Override
+  public boolean contains(Descriptor neighbor)
+  {
+    for (Integer topic: neighborMap.keySet())
+      if (neighborMap.get(topic).contains(neighbor)/*
+                                                    * || randomNeighborMap !=
+                                                    * null &&
+                                                    * randomNeighborMap.get
+                                                    * (topic).contains(neighbor)
+                                                    */)
+        return true;
+    return false;
+  }
+
+
+
+  private void resetTopicAge(int topic)
+  {
+    topicAge.put(topic, 0);
+  }
+
+
+
+  public int getTopicAge(int topic)
+  {
+    return (topicAge==null) ? 0 : topicAge.get(topic);
+  }
+
+
+
+  /**
+   * Increments age of topics while returning the topic with maximum age
+   */
+  private int incrementAgeofTopics()
+  {
+    int maxAge = -1;
+    for (Integer topic: topicAge.keySet())
+    {
+      int age = topicAge.get(topic)+1;
+      topicAge.put(topic, age);
+      if (age>maxAge)
+      {
+        maxAge = age;
+      }
+    }
+    Vector<Integer> maxAgeTopics = new Vector<Integer>();
+    for (Integer topic: topicAge.keySet())
+    {
+      if (topicAge.get(topic)==maxAge)
+      {
+        maxAgeTopics.add(topic);
+      }
+    }
+    Random rand = new Random(0); // ALWAYS give a constant seed to Random!! Else
+                                 // experiments are not repeatable.
+    int maxAgeTopic = maxAgeTopics.get(rand.nextInt(maxAgeTopics.size()));
+    return maxAgeTopic;
+  }
+
+
+
+  public void considerNodes(Collection<Descriptor> descriptors)
+  {
+    if(descriptors == null) return;
+     init();
+    // System.out.println(CommonState.getTime());
+    Node selfNode = CommonState.getNode();
+    // go through all received neighbors
+    for (Integer topic: neighborMap.keySet())
+    {
+      Set<Descriptor> neighbors = neighborMap.get(topic);
+      for (Descriptor d: descriptors)
+      {
+        if (neighbors.contains(d))
+        {
+          //Update the fresh descriptor:
+          neighbors.remove(d);
+          neighbors.add(d);
+          continue;
+        }
+        if(d.getID()==selfNode.getID())
+          continue;
+        Set<Integer> candidateTopics = getDescriptorTopics(d);
+        if (candidateTopics.contains(topic))
+        {
+          considerNodeForTopic(d, neighbors, selfNode);
+        }
+      }
+    }
+  }
+
+
+
+  /**
+   * 
+   */
+  protected void init()
+  {
+    // if (randomNeighborMap==null)
+    // {
+    if (topicAge==null)
+    {
+      topicAge = new HashMap<Integer, Integer>();
+      // randomNeighborMap = new HashMap<Integer, Set<Descriptor>>();
+      for (Integer topic: neighborMap.keySet())
+      {
+        // randomNeighborMap.put(topic, new HashSet<Descriptor>());
+        if (topicAge.containsKey(topic)==false)
+          topicAge.put(topic, 0);
+      }
+    }
+  }
+
+
+
+  @Override
+  protected Descriptor applyHashFunction(Descriptor candidate, Set<Descriptor> neighbors, Node myDesc)
+  {
+    Long candidateDistance = getClockwiseDistance(myDesc.getID(), candidate.getID());
+    // Sort the neighbors according to ascending order of clockwise distance
+    // from selfID to neighborID in the ID ring assuming largest ID possible is
+    // Long.MAX_VALUE
+    List<Descriptor> list = new ArrayList<Descriptor>(neighbors);
+    Collections.shuffle(list, CommonState.r);
+    ((NodeIDDistanceComparator) distComp).setReference(myDesc);
+    Collections.sort(list, distComp);
+    // Check the k/2th succesor and k/2th predecessor distance because they will
+    // be the worst succesors and predecessors
+    // TODO For odd number K there will be one neighbor always left out so for
+    // the time being considering that neighbor as a successor.
+    Descriptor worstSuccessor = list.get(((int) Math.ceil((double) list.size()/2))-1);
+    Descriptor worstPredecessor = list.get(list.size()/2);
+    Long worstPredecessorDist = getClockwiseDistance(myDesc.getID(), worstPredecessor.getID());
+    Long worstSuccesorDist = getClockwiseDistance(myDesc.getID(), worstSuccessor.getID());
+    // If the Candidate is is nearer to selfID than worstSuccessor then we
+    // replace worstSuccessor by Candidate
+    // And similarly worstPredecessor
+    if (candidate.equals(worstSuccessor)==false&&candidateDistance<worstSuccesorDist)
+    {
+      neighbors.remove(worstSuccessor);
+      neighbors.add(candidate);
+      return worstSuccessor;
+    }
+    else if (candidate.equals(worstPredecessor)==false&&candidateDistance>worstPredecessorDist)
+    {
+      neighbors.remove(worstPredecessor);
+      neighbors.add(candidate);
+      return worstPredecessor;
+    }
+    return null;
+  }
+
+
+
+  public static Long getClockwiseDistance(Long myId, Long neighborId)
+  {
+    if (myId<=neighborId)
+      return neighborId-myId;
+    else
+      return Long.MAX_VALUE-myId+neighborId;
+  }
+
+
+
+  public static Long getDirectionlessDistance(Long myId, Long neighborId)
+  {
+    int size = Network.size();
+    if(neighborId <= myId + (int)((int)size / 2))
+      return Math.abs(myId-neighborId);
+    else
+      return Math.abs(size-neighborId+myId);
+  }
+
+
+
+  protected Vector<Descriptor> collectNeighborsFromAllProtocols(Node selfNode, int pid)
+  {
+    // If no protocols are linked, return the view, as is.
+    if (!FastConfig.hasLinkable(pid))
+      return null;
+    Vector<Descriptor> neighborsFromAllProtocols = new Vector<Descriptor>();
+    // Then collect neighbors from linked protocols
+    for (int i = 0; i<FastConfig.numLinkables(pid); i++)
+    {
+      int linkableID = FastConfig.getLinkable(pid, i);
+      Linkable linkable = (Linkable) selfNode.getProtocol(linkableID);
+      // Add linked protocol's neighbors
+      for (int j = 0; j<linkable.degree(); j++)
+      {
+        DescriptorRT d = (DescriptorRT) linkable.getNeighbor(j);
+        if (neighborsFromAllProtocols.contains(d)==false)
+          neighborsFromAllProtocols.add(d);
+      }
+    }
+    return neighborsFromAllProtocols;
+  }
+
+
+
+  @Override
+  public void nextCycle(Node node, int protocolID)
+  {
+    init();
+    considerNodes(collectNeighborsFromAllProtocols(node, protocolID));
+    // Acquire fresh own descriptor
+    // Need to call getDescriptor, as it may produce gradually changing profiles
+    Descriptor selfDescr = node.getDescriptor(protocolID);
+    int topicToGossip = incrementAgeofTopics();
+    if (topicToGossip==-1)
+      return;
+    Set<Descriptor> neighbors = this.getRingNeighbors(topicToGossip);
+    if (neighbors==null)
+      return;
+    Vector<Descriptor> listNeighbors = new Vector<Descriptor>(neighbors);
+    // Descriptor peerDescr = getNearestPeer(selfDescr, listNeighbors);
+    if (listNeighbors.size()<=0)
+      return;
+    // Select a random peer to gossip with
+    Descriptor peerDescr = getPeerToGossip(listNeighbors);
+    if (peerDescr==null)
+      return;
+     resetTopicAge(topicToGossip);
+    // Remove this neighbor anticipating that if that peer is actually still
+    // alive it will respond, and will be added anew to the routing table.
+    selectNeighborsToSend(selfDescr, peerDescr, topicToGossip, listNeighbors);
+    // Send the selected neighbors to this peer.
+    int tid = FastConfig.getTransport(protocolID);
+    Transport tr = (Transport) node.getProtocol(tid);
+    RoutingTableMessage msg = new RoutingTableMessage();
+    msg.type = Message.Type.GOSSIP_REQUEST;
+    msg.sender = selfDescr;
+    msg.descriptors = listNeighbors;
+    msg.topic = topicToGossip;
+    tr.send(selfDescr, peerDescr, protocolID, msg);
+    // Increase the age field of every neighbor
+    assert (selfDescr instanceof DescriptorAge): "RoutingTableRingCast needs DescriptorAge descriptors, or their descendants.";
+    // for (Descriptor d: neighbors)
+    // ((DescriptorAge) d).incAge();
+  }
+
+
+
+  /**
+   * The same as {@link #eliminateDuplicates_sorted()}, but without assuming a
+   * sorted cache. Obviously, this one is more expensive. More specifically, for
+   * any two view from the same node, it keeps the one suggested by the
+   * keepComparator, and removes the other. Does not work correctly if the cache
+   * is not already sorted.
+   */
+  protected final Vector<Descriptor> eliminateDuplicates(Vector<Descriptor> descriptors)
+  {
+    Vector<Descriptor> removed = new Vector<Descriptor>();
+    // Start from the end of the list
+    for (int a = descriptors.size()-1; a>=0; a--)
+    {
+      Descriptor descrA = descriptors.elementAt(a);
+      // Start from node[a-1], and check all the way to node[0]
+      for (int b = a-1; b>=0; b--)
+      {
+        if (descriptors.elementAt(b).equals(descrA)) // if descrB==descrA
+        {
+          // We have to evoke node[a].
+          removed.add(descriptors.remove(a));
+          // Then, since node[a] is removed, stop comparing it to other in,
+          // and move to the next iteration of the a-loop (outer).
+        }
+      }
+    }
+    return removed;
+  }
+
+
+
+  /**
+   * @param source
+   * @param topicToGossip
+   * @param listNeighbors
+   * @param destination
+   */
+  protected void selectNeighborsToSend(Descriptor source, Descriptor destination, int topicToGossip,
+      Vector<Descriptor> listNeighbors)
+  {
+    if(rtGossipLen == 0)
+      return;
+    // include self descriptor in case your neighbor does not know about you
+//    listNeighbors.add(source);
+    listNeighbors.addAll(collectNeighborFromAllProtocols(((DescriptorSim) (source)).getNode(), selfPID, topicToGossip));
+    eliminateDuplicates(listNeighbors);
+    listNeighbors.remove(destination);
+    int size = listNeighbors.size();
+    if (size>K)
+    {
+      getBestKNeighbors(destination, listNeighbors, size);
+    }
+    getNeighborsFromOtherTopics(source, destination, topicToGossip, listNeighbors, rtGossipLen);
+    while(listNeighbors.size() > rtGossipLen)
+    {
+      listNeighbors.remove(listNeighbors.size()-1);
+    }
+  }
+
+
+
+  /**
+   * @param destination
+   * @param listNeighbors
+   * @param size
+   */
+  protected void getBestKNeighbors(Descriptor destination, Vector<Descriptor> listNeighbors, int size)
+  {
+    Collections.shuffle(listNeighbors, CommonState.r);
+    (distComp).setReference(((DescriptorSim) (destination)).getNode());
+    Collections.sort(listNeighbors, distComp);
+    while (size>K)
+    {
+      listNeighbors.remove(size/2);
+      size = listNeighbors.size();
+    }
+  }
+
+
+
+  /**
+   * @param destination
+   * @param topicToGossip
+   * @param listNeighbors
+   */
+  protected void getNeighborsFromOtherTopics(Descriptor source, Descriptor destination, int topicToGossip,
+      Vector<Descriptor> listNeighbors, int howMany)
+  {
+    Set<Integer> topics = ((DescriptorRT) (destination)).getTopicSet();
+    int count = 0;
+    Object[] topicSet = topics.toArray();
+    Random rand = new Random(0); // ALWAYS give a constant seed to Random!! Else
+                                 // experiments are not repeatable.
+    while (count!=topicSet.length&&listNeighbors.size()<howMany)
+    {
+      int index = rand.nextInt(topicSet.length);
+      count++;
+      int topic = (Integer) topicSet[index];
+      if (topic==topicToGossip)
+        continue;
+      Set<Descriptor> topicNeighbors = neighborMap.get(topic);
+      if (topicNeighbors!=null)
+      {
+        Vector<Descriptor> neighborsFromAllProtocols = collectNeighborFromAllProtocols(((DescriptorSim) (source)).getNode(), selfPID, topic);
+        neighborsFromAllProtocols.addAll(topicNeighbors);
+        neighborsFromAllProtocols.remove(destination);
+        getBestKNeighbors(destination, neighborsFromAllProtocols, neighborsFromAllProtocols.size());
+        for (Descriptor d: neighborsFromAllProtocols)
+        {
+          if (listNeighbors.contains(d)==false && listNeighbors.size() < rtGossipLen)
+          {
+            listNeighbors.add(d);
+            if(listNeighbors.size() == rtGossipLen)
+              break;
+          }
+        }
+      }
+    }
+  }
+
+
+
+  /**
+   * @param listNeighbors
+   * @return
+   */
+  protected Descriptor getPeerToGossip(Vector<Descriptor> listNeighbors)
+  {
+    Random rand = new Random(0); // ALWAYS give a constant seed to Random!! Else
+                                 // experiments are not repeatable.
+    Descriptor peerDescr = listNeighbors.get(rand.nextInt(listNeighbors.size()));
+    return peerDescr;
+  }
+
+
+
+  @Override
+  public void processEvent(Node node, int pid, Object event)
+  {
+     init();
+    RoutingTableMessage msg = (RoutingTableMessage) event;
+    switch (msg.type)
+    {
+      case GOSSIP_REQUEST:
+        processGossipRequest(msg.sender, node, pid, msg.descriptors, msg.topic);
+        break;
+      case GOSSIP_RESPONSE:
+    }
+  }
+
+
+//protected void exchangeMessages(Node selfNode, Node neighborNode)
+//{
+//  DisseminationProtocol myDP = (DisseminationProtocol) selfNode.getProtocol(DPpid);
+//  DisseminationProtocol neighborDP = (DisseminationProtocol) neighborNode.getProtocol(DPpid);
+//  for(Integer messageID : neighborDP.messageDigest.keySet())
+//  {
+//    if(myDP.messageDigest.containsKey(messageID) == false)
+//    {
+//      Integer hops = neighborDP.messageDigest.get(messageID);
+//      myDP.messageDigest.put(messageID, hops+1);
+//    }
+//  }
+//}
+  
+  protected void processGossipRequest(Descriptor sender, Node selfNode, int pid, Vector<Descriptor> received, int topicToGossip)
+  {
+    Descriptor selfDescr = selfNode.getDescriptor(pid);
+    Set<Descriptor> neighbors = this.getRingNeighbors(topicToGossip);
+    Vector<Descriptor> listNeighbors = new Vector<Descriptor>(neighbors);
+    incrementAgeofTopics();
+     resetTopicAge(topicToGossip);
+    selectNeighborsToSend(selfDescr, sender, topicToGossip, listNeighbors);
+    // for (Descriptor d: neighbors)
+    // ((DescriptorAge) d).resetAge();
+    // Consider sender too remember we removed it from the routing table
+    // anticipating it will get back
+    received.add(sender);
+    // Insert the received neighbors to my view
+    considerNodes(received);
+    // Send the selected neighbors to this peer.
+    int tid = FastConfig.getTransport(pid);
+    Transport tr = (Transport) selfNode.getProtocol(tid);
+    RoutingTableMessage msg = new RoutingTableMessage();
+    msg.type = Message.Type.GOSSIP_RESPONSE;
+    msg.sender = selfDescr;
+    msg.descriptors = listNeighbors;
+    msg.topic = topicToGossip;
+    tr.send(selfDescr, sender, pid, msg);
+  }
+
+
+
+  protected void processResponse(Node node, int pid, Vector<Descriptor> received)
+  {
+    considerNodes(received);
+  }
+}

@@ -1,0 +1,11 @@
+K 10
+svn:ignore
+V 108
+cyclon.cfg
+gnuplotscript
+hitratio_prionr.jpg
+quickcluster_cyclononly.cfg
+quickcluster_vicinityonly.cfg
+test
+
+END

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+export CLASSPATH=./bin:../PeerEmu/bin:../PeerEmu/jep-2.3.0.jar:../PeerEmu/djep-1.0.0.jar:/home/vidya/Desktop/vidhi/Academics/PDCS/Thesis/Experiments/commons-math3-3.0/commons-math3-3.0.jar
+
+java -Xmx2g -ea peeremu.Simulator $*

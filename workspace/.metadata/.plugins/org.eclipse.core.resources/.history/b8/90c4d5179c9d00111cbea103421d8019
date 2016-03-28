@@ -1,0 +1,9 @@
+package adriana.nonatomic;
+
+import peeremu.core.Descriptor;
+
+public class HbeatMsg
+{
+  public double initval;
+  public double value;
+}

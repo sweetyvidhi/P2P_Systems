@@ -1,0 +1,17 @@
+import os
+
+f=open("mehyarout","r");
+lines = f.readlines();
+N=50
+j=0
+for i in lines:
+	j+=1
+	if j > 3:
+		thisline = i.split()
+		r = int(thisline[0])
+		nid = int(thisline[1])
+		val = float(thisline[2])
+		command = 'echo "%s %s" >> %s' %(r,val,nid)
+		os.system(command)
+		
+		

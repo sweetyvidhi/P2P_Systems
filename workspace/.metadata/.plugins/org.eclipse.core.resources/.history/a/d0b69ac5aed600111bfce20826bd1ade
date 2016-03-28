@@ -1,0 +1,169 @@
+NODES 							1000
+MAXNODES						NODES+100
+TICKS_PER_MSEC                  1
+TICKS_PER_SECOND				1000 * TICKS_PER_MSEC
+TICKS_PER_ROUND					1 * TICKS_PER_SECOND
+ROUNDS							200
+RANGE							1048576			#Initval 10^3,10^6,10^9,2^20=1048576(default)
+
+CYCLON_VIEW						20				#Cyclon(default=20)
+CYCLON_GOSSIP					5				#Cyclon
+
+X								50			#Churn rate
+CONFIDENCE						0				#For convergence ratio
+GROUPSIZE						8				#Robustness(default=8)
+SUSP_THRESH					    5		#Robustness threshold
+T_HEARTBEAT						(TICKS_PER_ROUND/2) #Robustness protocol period
+LAMBDA							1000			#Initval poisson lambda factor(default=1000)
+MSGLOSS							20				#For Robustness protocol(default=5)
+SUSP_FUNCTION					0			#For Robustness protocol - 0=delay(default),1=normal
+INITVAL_FN						0		#0=range(default),1=poisson,2=nonuniform
+RANDOMSEED						1
+					
+random.seed						RANDOMSEED
+simulation.endtime       		ROUNDS * TICKS_PER_ROUND
+simulation.logtime       		5000
+network.size 					NODES
+network.maxSize 				MAXNODES		#Set it for churn	
+
+include.init			topology_cyclon,cd_cyclon,cd_aggregation,king_latencies,cd_robust 
+
+init.king_latencies		 peeremu.transport.MatrixParser
+{
+  file					/home/vidya/Desktop/vidhi/Academics/PDCS/Thesis/workspace/PeerEmuProtocols/king_matrix_connected
+  ticks_per_sec			TICKS_PER_SECOND
+  trace_ticks_per_sec	1000000
+}
+init.topology_cyclon     peeremu.dynamics.WireKOut			#Cyclon
+{
+  protocol               cyclon
+  k                      CYCLON_VIEW
+}
+
+init.cd_cyclon			peeremu.edsim.CDScheduler			#Cyclon
+{
+	protocol			cyclon
+}
+
+init.cd_aggregation		 peeremu.edsim.CDScheduler
+{ 
+	protocol			aggregation_protocol
+}
+
+init.cd_robust			peeremu.edsim.CDScheduler
+{
+	protocol			 robustness_protocol
+}
+
+include.protocol		 trans,cyclon,aggregation_protocol,robustness_protocol
+protocol.cyclon          gossip.protocol.CyclonED			#Cyclon
+{
+  				
+  descriptor			 gossip.descriptor.DescriptorSimAge
+  settings               gossip.protocol.CyclonSettings
+
+  select                 gossip.comparator.AgeDescending
+  duplicate              gossip.comparator.AgeAscending
+
+  view                   CYCLON_VIEW
+  gossip                 CYCLON_GOSSIP
+  step                   TICKS_PER_ROUND
+  #at					 TICKS_PER_ROUND
+  transport              trans
+}
+
+protocol.aggregation_protocol	thesis.three.AggregationProtocol
+{
+	linkable					cyclon									#With cyclon
+	descriptor			        gossip.descriptor.DescriptorSimAge		#With cyclon
+	view						CYCLON_VIEW
+	size						NODES
+	range						RANGE									#Initval range
+	lambda						LAMBDA									#Initval poisson
+	initval_fn					INITVAL_FN
+	transport					trans
+	from 						10
+	step						TICKS_PER_ROUND
+	randstart
+} 
+
+protocol.robustness_protocol	thesis.three.RobustnessProtocol
+{
+	linkable					aggregation_protocol
+	descriptor			        gossip.descriptor.DescriptorSimAge
+	groupsize					GROUPSIZE
+	heartbeat					T_HEARTBEAT
+	susp_thresh					SUSP_THRESH
+	msg_loss					MSGLOSS
+	susp_function				SUSP_FUNCTION
+	transport					trans
+	from						10
+	step						T_HEARTBEAT
+}
+
+#protocol.trans					UniformRandomTransport
+#{,stddev
+#mindelay					0			
+#maxdelay					0
+#	mindelay				 	5 * TICKS_PER_MSEC		#Delayed experiments
+#	maxdelay					200 * TICKS_PER_MSEC		#Delayed experiments
+#}
+
+protocol.trans					TransportEmu
+
+include.control					avg,group,stddev					#,dnet
+control.group					thesis.three.GroupControl			#Grouping
+{
+	protocol					robustness_protocol
+	maxsize						GROUPSIZE
+	endtime						(ROUNDS-1)*TICKS_PER_ROUND
+	printgroup					0	
+	printsusp					0
+	from						0
+	step						TICKS_PER_ROUND
+}	
+
+control.avg						thesis.three.AvgControl			#Finding true average
+{
+	protocol					aggregation_protocol
+	print 						0
+	at							1	
+}
+
+control.stddev					thesis.three.StdDeviationControl
+{
+	protocol					aggregation_protocol
+	confidence					CONFIDENCE
+	threshold					0.000001
+	range						RANGE				#Initval range
+	nodes						NODES
+	type						9				#1=Stddeviation,2=ConvergenceRatio,3=converginground,4=standarddeviation with x%nodes killed, 
+	X							X					#5=conv ratio with x%nodes killed,6=converging round with x%nodes killed
+	initval_fn					INITVAL_FN
+	ticks_per_round				TICKS_PER_ROUND
+	from						0
+	step						TICKS_PER_ROUND
+}
+
+control.dnet					peeremu.dynamics.DynamicNetwork		#Churn experiments
+{
+	add							X
+	substitute					
+	from						35
+	step 						TICKS_PER_SECOND
+	#until						40*TICKS_PER_ROUND
+	#at							20*TICKS_PER_ROUND
+	init.0 						peeremu.dynamics.RandNI		
+	{      
+		protocol 				cyclon
+		k						CYCLON_VIEW
+	}
+	init.1						peeremu.edsim.CDScheduler
+	{	
+		protocol				aggregation_protocol
+	}
+	init.2						peeremu.edsim.CDScheduler
+	{
+		protocol				robustness_protocol
+	}
+}

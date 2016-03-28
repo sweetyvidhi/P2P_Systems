@@ -1,0 +1,150 @@
+/*
+ * Created on Jun 18, 2010 by Spyros Voulgaris
+ *
+ */
+package gossip.vicinity;
+
+import java.util.Vector;
+
+import peeremu.edsim.CDProtocol;
+import peeremu.config.Configuration;
+import peeremu.core.CommonState;
+import peeremu.core.Descriptor;
+import peeremu.core.Linkable;
+import peeremu.core.Network;
+import peeremu.core.Node;
+import peeremu.edsim.EDProtocol;
+import peeremu.util.RandPermutation;
+
+
+
+public class RandomOracle implements CDProtocol, Linkable
+{
+  /**
+   *  View size of the protocol.
+   */
+  private static final String PAR_VIEWLEN= "view";
+
+  private static int viewLen;
+  private static RandPermutation rp;
+
+  private Vector<Descriptor> view;
+
+  /**
+   * Default constructor.
+   * Called only once for a new protocol class instance.
+   */
+  public RandomOracle(String prefix)
+  {
+    viewLen = Configuration.getInt(prefix+"."+PAR_VIEWLEN);
+    view = new Vector<Descriptor>(viewLen);
+    rp = new RandPermutation(CommonState.r);
+  }
+
+
+
+
+  /**
+   * Fill in the view with 'viewLen' random peers.
+   */
+  public void nextCycle(Node selfNode, int pid)
+  {
+    view = new Vector<Descriptor>(viewLen);
+
+    rp.reset(Network.size());
+    for (int i=0; i<viewLen && rp.hasNext(); i++)
+    {
+      Node n = Network.get(rp.next());
+      if (n==selfNode)
+      {
+        i--;
+        continue;
+      }
+      Descriptor d = n.getDescriptor(pid);
+      view.add(d);
+    }
+  }
+
+
+
+
+  @Override
+ /* public void processEvent(Node node, int pid, Object event)
+  {
+    assert false;
+  }*/
+
+
+
+  /**
+   * Individual views are instantiated by means of the clone function.
+   */
+  public Object clone()
+  {
+    RandomOracle ro = null;
+
+    try {ro = (RandomOracle)super.clone();}
+    catch (CloneNotSupportedException e) {e.printStackTrace();} //never happens
+
+    // No need for deep cloning of 'view'.
+    ro.view = (Vector<Descriptor>)view.clone();
+
+    return ro;
+  }
+
+
+
+
+  @Override
+  public void onKill()
+  {
+    assert false;
+  }
+
+
+
+
+  @Override
+  public int degree()
+  {
+    return view.size();
+  }
+
+
+
+
+  @Override
+  public Descriptor getNeighbor(int i)
+  {
+    return view.elementAt(i);
+  }
+
+
+
+
+  @Override
+  public boolean addNeighbor(Descriptor neighbour)
+  {
+    assert false;
+    return false;
+  }
+
+
+
+
+  @Override
+  public boolean contains(Descriptor neighbor)
+  {
+    assert false;
+    return false;
+  }
+
+
+
+
+  @Override
+  public void pack()
+  {
+    assert false;
+  }
+}

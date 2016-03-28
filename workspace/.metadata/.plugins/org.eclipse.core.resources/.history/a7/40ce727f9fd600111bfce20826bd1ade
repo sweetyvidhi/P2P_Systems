@@ -1,0 +1,366 @@
+package thesis.three;
+
+import peeremu.config.Configuration;
+import peeremu.core.CommonState;
+import peeremu.core.Control;
+import peeremu.core.Network;
+import peeremu.core.Node;
+
+public class StdDeviationControl implements Control
+{
+  private int pid;
+  private int confidence;
+  private double threshold;
+  private double range;
+  private int type;
+  private boolean convflag=true;
+  private double stddevprev=0.0;
+  private int initval_fn;
+  private double x;
+  private int killed=0;
+  private int convfl=0;
+  private double ticks_per_round;
+  
+  private static final String PAR_CONFIDENCE = "confidence";
+  private static final String PAR_THRESHOLD = "threshold";
+  private static final String PAR_TYPE = "type";
+  private static final String PAR_RANGE="range";
+  private static final String PAR_INITVALFN="initval_fn";
+  private static final String PAR_X="X";
+  private static final String PAR_TICKS_PER_ROUND="ticks_per_round";
+  public StdDeviationControl(String prefix)
+  {
+    pid = Configuration.getPid(prefix+"."+PAR_PROTOCOL);
+    confidence = Configuration.getInt(prefix+"."+PAR_CONFIDENCE);
+    threshold = Configuration.getDouble(prefix+"."+PAR_THRESHOLD);
+    type = Configuration.getInt(prefix+"."+PAR_TYPE);
+    range = Configuration.getDouble(prefix+"."+PAR_RANGE);
+    initval_fn = Configuration.getInt(prefix+"."+PAR_INITVALFN);
+    x=Configuration.getDouble(prefix+"."+PAR_X);
+    ticks_per_round = Configuration.getDouble(prefix+"."+PAR_TICKS_PER_ROUND);
+  }
+  @Override
+  public boolean execute()
+  {
+    
+    
+    if(type==1||type==2||type==7)
+    {
+      double sum = 0.0,avg=0.0,stdev=0.0;
+      int N=0;
+      for(int i=0;i<Network.size();i++)
+      {
+        Node n = Network.get(i);
+        AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+        if(ap.round > confidence)
+        { 
+          sum+=ap.value;
+          N++;
+        }
+      }
+      avg = sum/N;
+      sum=0.0;
+      for(int i=0;i<Network.size();i++)
+      {
+        Node n = Network.get(i);
+        AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+        if(ap.round > confidence)
+        {
+          sum+=Math.pow((ap.value-avg),2);  
+        }
+      }
+      if(type==1)
+      {
+          stdev=Math.sqrt(sum/N);         //Standard Deviation
+          System.out.println(CommonState.getTime()/1000+" "+stdev+" "+N);
+      }
+      else if(type==2)
+      {
+        stdev = sum/N;                    //Convergence Ratio
+        System.out.println(CommonState.getTime()/1000+" "+(stdev/stddevprev)+" "+N);
+      }
+      else if(type==7)
+      {
+        for(int i=0;i<Network.size();i++)
+        {
+          Node n = Network.get(i);
+          AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+          if(ap.round > confidence)
+          {
+            System.out.println(ap.confidence+" "+(Math.abs(ap.value-avg)/avg)*100);
+          }
+        }
+      }
+      stddevprev=stdev;
+    }
+    else if(type==3||type==6)
+    {
+      double min,max,r,delay=0;
+      int nodesize=0;
+      Node n = Network.get(0);
+      AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+      min=ap.value;
+      max=ap.value;
+      double initmin=ap.initval;
+      double initmax=ap.initval;
+      int num = (int)((x*Network.size())/100);
+      if(killed==0)
+      {
+          nodesize=Network.size();
+      }
+        else
+      {
+          nodesize=Network.size()-num;
+      }
+      for(int i=1;i<nodesize;i++)
+      {
+        n = Network.get(i);
+        ap = (AggregationProtocol)n.getProtocol(pid);
+        if(ap.value<min)
+          min = ap.value;
+        if(ap.value>max)
+          max = ap.value;
+        if(ap.initval<initmin)
+          initmin = ap.initval;
+        if(ap.initval>initmax)
+          initmax = ap.initval;
+        delay+=ap.delay;
+      }
+      r = max - min;
+      if(initval_fn==1||initval_fn==2)
+      {
+        range = initmax - initmin;      //initval = poisson,nonuniform
+      }
+      if(r <= (range*threshold) && convflag)
+      {
+        System.out.println("Converging round "+Network.size()+" "+CommonState.getTime()/ticks_per_round+" "+delay);
+        convflag = false;
+        convfl=1;
+      }      
+      if(type==6) //Kill x nodes after convergence
+      {
+        if(!convflag && convfl==1)
+        {
+          for(int i=Network.size()-1;i>Network.size()-1-num;i--)  
+          {
+            
+            n = Network.get(i);
+            n.setFailState(Node.DEAD);
+          }
+          
+          convfl=0;
+          killed=1;
+        }
+        
+      }
+    }
+    else if(type==4||type==5||type==8)
+    {
+      double min,max,r;
+      int nodesize=0;
+      double sum = 0.0,avg=0.0,stdev=0.0;
+      int N=0;
+      int num = (int)((x*Network.size())/100);
+      if(killed==0)
+      {
+          nodesize=Network.size();
+      }
+        else
+      {
+          nodesize=Network.size()-num;
+      }
+      
+      for(int i=0;i<nodesize;i++)
+      {
+        Node n = Network.get(i);
+        AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+        if(ap.round > confidence)
+        { 
+          sum+=ap.value;
+          N++;
+        }
+      }
+      avg = sum/N;
+      sum=0.0;
+      for(int i=0;i<nodesize;i++)
+      {
+        Node n = Network.get(i);
+        AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+        if(ap.round > confidence)
+        {
+          sum+=Math.pow((ap.value-avg),2);  
+        }
+      }
+      if(type==4)
+      {
+          stdev=Math.sqrt(sum/N);         //Standard Deviation
+          System.out.println(CommonState.getTime()/1000+" "+stdev+" "+N);
+      }
+      else if(type==5)
+      {
+        stdev = sum/N;                    //Convergence Ratio
+        System.out.println(CommonState.getTime()/1000+" "+stdev/stddevprev+" "+N);
+      }
+      else if(type==8)
+      {
+        for(int i=0;i<nodesize;i++)
+        {
+          Node n = Network.get(i);
+          AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+          System.out.println(ap.confidence+" "+(Math.abs(ap.value-avg)/avg)*100);
+        }
+      }
+      stddevprev=stdev;
+      /***********************For convergence****************/
+      
+      Node n = Network.get(0);
+      AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+      min=ap.value;
+      max=ap.value;
+      double initmin=ap.initval;
+      double initmax=ap.initval;
+      for(int i=1;i<nodesize;i++)
+      {
+        n = Network.get(i);
+        ap = (AggregationProtocol)n.getProtocol(pid);
+        if(ap.value<min)
+          min = ap.value;
+        if(ap.value>max)
+          max = ap.value;
+        if(ap.initval<initmin)
+          initmin = ap.initval;
+        if(ap.initval>initmax)
+          initmax = ap.initval; 
+      }
+      r = max - min;
+      if(initval_fn==1||initval_fn==2)
+      {
+        range = initmax - initmin;      //initval = poisson,nonuniform
+      }
+      if(r <= (range*threshold) && convflag)
+      {
+        convflag = false;
+        convfl=1;
+      }   
+       //Kill x nodes after convergence
+        if(!convflag && convfl==1)
+        {
+          for(int i=Network.size()-1;i>Network.size()-1-num;i--)  
+          {
+            
+            n = Network.get(i);
+            n.setFailState(Node.DEAD);
+          }   
+          convfl=0;
+          killed=1;
+        }      
+    }
+    else if(type==9)
+    {
+      double min,max,r,delay=0;
+      int nodesize=0;
+      Node n = Network.get(0);
+      AggregationProtocol ap = (AggregationProtocol)n.getProtocol(pid);
+      min=ap.value;
+      max=ap.value;
+      double initmin=ap.initval;
+      double initmax=ap.initval;
+      int num = (int)((x*Network.size())/100);
+      if(killed==0)
+      {
+          nodesize=Network.size();
+      }
+        else
+      {
+          nodesize=Network.size()-num;
+      }
+      for(int i=1;i<nodesize;i++)
+      {
+        n = Network.get(i);
+        ap = (AggregationProtocol)n.getProtocol(pid);
+        if(ap.value<min)
+          min = ap.value;
+        if(ap.value>max)
+          max = ap.value;
+        if(ap.initval<initmin)
+          initmin = ap.initval;
+        if(ap.initval>initmax)
+          initmax = ap.initval;
+        delay+=ap.delay;
+      }
+      r = max - min;
+      if(initval_fn==1||initval_fn==2)
+      {
+        range = initmax - initmin;      //initval = poisson,nonuniform
+      }
+      
+//      if(!convflag)
+//      {
+//        double sum=0,sum1=0;
+//        for(int i=0;i<nodesize;i++)
+//        {
+//          n = Network.get(i);
+//          ap = (AggregationProtocol)n.getProtocol(pid);
+//          sum+=ap.initval;
+//        }
+//        double trueavg=sum/nodesize;
+//        for(int i=0;i<nodesize;i++)
+//        {
+//          n = Network.get(i);
+//          ap = (AggregationProtocol)n.getProtocol(pid);
+//          sum1+=Math.abs(trueavg-ap.value);
+//        }
+//        System.out.println("Error "+(sum1/nodesize));
+//        convfl=0;
+//      }
+      
+      if(r <= (range*threshold))
+      {
+        
+        if(!convflag)
+        {
+          double sum=0,sum1=0;
+          for(int i=0;i<nodesize;i++)
+          {
+            n = Network.get(i);
+            ap = (AggregationProtocol)n.getProtocol(pid);
+            sum+=ap.initval;
+          }
+          double trueavg=sum/nodesize;
+          for(int i=0;i<nodesize;i++)
+          {
+            n = Network.get(i);
+            ap = (AggregationProtocol)n.getProtocol(pid);
+            sum1+=Math.abs(trueavg-ap.value);
+          }
+          System.out.println("Error "+CommonState.getTime()+" "+(sum1/nodesize));
+          convfl=0;
+        }
+        else
+        {
+        System.out.println("Converging round "+Network.size()+" "+CommonState.getTime()/ticks_per_round+" "+delay);
+        convfl=1;
+        }
+        convflag = false;
+      }      
+      
+        if(convfl==1)
+        {
+          for(int i=Network.size()-1;i>Network.size()-1-num;i--)  
+          {
+            
+            n = Network.get(i);
+            n.setFailState(Node.DEAD);
+          }
+          
+          convfl=0;
+          killed=1;
+        }
+        
+      
+      
+    }
+    // TODO Auto-generated method stub
+    return false;
+  }
+}

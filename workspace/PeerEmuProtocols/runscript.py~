@@ -1,0 +1,38 @@
+import os
+import sys
+
+if len(sys.argv) <= 1:
+	print 'Not enough arguments'
+	sys.exit(0)
+path = '/home/vidya/Desktop/vidhi/Academics/PDCS/Thesis/evaluation/LogPlots/'
+protocol = sys.argv[1]	
+scriptname = path+'plot'+protocol+'.py'
+command = 'echo "set logscale xy" > %s' %scriptname
+os.system(command)
+command = 'echo "set terminal png enhanced large" >> %s' %scriptname
+os.system(command)
+N = [ 100,200,500,1000,2000,3000,4000,5000,6000,7500 ]
+for nodes in range(len(N)):
+	outfile = path + protocol + str(N[nodes])
+	if protocol == 'kempe':
+		command= './go src/kempe/kempe.cfg NODES='+ str(N[nodes]) + ' > ' + outfile
+	elif protocol == 'jelasity':
+		command='./go src/jelasity/aggregation.cfg NODES='+ str(N[nodes]) + ' > ' + outfile
+	elif protocol == 'mehyar':
+		command='./go src/mehyar/mehyar.cfg NODES='+ str(N[nodes]) + ' > ' + outfile
+	else:
+		print 'Invalid protocol'
+		sys.exit(0)
+	print outfile
+	print command
+	os.system(command)
+	command = 'python stddev.py '+outfile+' '+str(N[nodes]) + ' > ' + path+protocol+'N='+str(N[nodes])
+	print command
+	os.system(command)
+	fig=path + protocol+'N='+str(N[nodes])
+	temp="set output '%s.png'" %fig
+	command ='echo "%s" >> %s' %(temp,scriptname)
+	os.system(command)
+	temp="plot '%s' using 1:2" %fig
+	command = 'echo "%s" >> %s' %(temp,scriptname)
+	os.system(command)

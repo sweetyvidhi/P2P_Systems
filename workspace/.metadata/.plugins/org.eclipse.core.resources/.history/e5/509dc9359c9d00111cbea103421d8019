@@ -1,0 +1,6 @@
+package adriana.nonatomic;
+
+public class SuspicionMsg
+{
+  public Vector<Suspicion> sp;
+}

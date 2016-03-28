@@ -1,0 +1,12 @@
+import os
+
+j=0
+scriptname='mscript'
+for j in range(50):
+	if(j==0):
+		temp="plot '%s' using 1:2 with lines" %j
+		command = 'echo "%s" >> %s' %(temp,scriptname)
+	else:
+		temp=", '%s' using 1:2 with lines" %j
+		command = 'echo "%s" >> %s' %(temp,scriptname)
+	os.system(command)

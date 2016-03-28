@@ -1,0 +1,9 @@
+package adriana.nonatomic;
+
+import peeremu.core.Descriptor;
+public class RespMsg extends Message
+{
+  public double svalue;
+  public double rvalue;
+  public Descriptor desc;
+}

@@ -1,0 +1,20 @@
+import sys
+import os
+
+if(len(sys.argv)) > 1:
+	filename = sys.argv[1]
+	lossp = sys.argv[2]
+
+f=open(filename,"r")
+lines = f.readlines()
+maximum=0.0
+j=0
+for i in lines:
+	if j >= 3:
+		thisline=i.split()
+		sp = float(thisline[2])
+		if sp > maximum :
+			maximum = sp
+	j=j+1
+print maximum,lossp
+
